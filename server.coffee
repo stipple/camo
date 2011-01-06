@@ -20,6 +20,20 @@ log = (msg) ->
 EXCLUDED_HOSTS = new RegExp(excluded.replace(".", "\\.").replace("*", "\\.*"))
 RESTRICTED_IPS = /^(10\.)|(127\.)|(169\.254)|(192\.168)|(172\.(1[6-9])|(2[0-9])|(3[0-1]))/
 
+total_connections   = 0
+current_connections = 0
+started_at          = new Date
+
+four_oh_four = (resp, msg) ->
+  log msg
+  resp.writeHead 404
+  finish resp, "Not Found"
+
+finish = (resp, str) ->
+  current_connections -= 1
+  current_connections  = 0 if current_connections < 1
+  resp.end str
+
 server = Http.createServer (req, resp) ->
   if req.method != 'GET' || req.url == '/'
     resp.writeHead 200
@@ -27,14 +41,13 @@ server = Http.createServer (req, resp) ->
   else if req.url == '/favicon.ico'
     resp.writeHead 200
     resp.end 'ok'
+  else if req.url == '/status'
+    resp.writeHead 200
+    resp.end "ok #{current_connections}/#{total_connections} since #{started_at.toString()}"
   else
+    total_connections   += 1
+    current_connections += 1
     url = Url.parse req.url
-
-    four_oh_four = (msg) ->
-      log msg
-      resp.writeHead 404, { }
-      resp.write "Not Found"
-      resp.end()
 
     transferred_headers =
       'Via'                    : process.env.CAMO_HEADER_VIA or= "Camo Asset Proxy #{version}"
@@ -59,12 +72,12 @@ server = Http.createServer (req, resp) ->
 
         if url.host? && !url.host.match(RESTRICTED_IPS)
           if url.host.match(EXCLUDED_HOSTS)
-            return four_oh_four("Hitting excluded hostnames")
+            return four_oh_four(resp, "Hitting excluded hostnames")
 
           src = Http.createClient url.port || 80, url.hostname
 
           src.on 'error', (error) ->
-            four_oh_four("Client Request error #{error.stack}")
+            four_oh_four(resp, "Client Request error #{error.stack}")
 
           query_path = url.pathname
           if url.query?
@@ -81,8 +94,8 @@ server = Http.createServer (req, resp) ->
 
             content_length  = srcResp.headers['content-length']
 
-            if(content_length > 5242880)
-              four_oh_four("Content-Length exceeded")
+            if content_length > 5242880
+              four_oh_four(resp, "Content-Length exceeded")
             else
               newHeaders =
                 'expires'                : srcResp.headers['expires']
@@ -92,15 +105,15 @@ server = Http.createServer (req, resp) ->
                 'X-Content-Type-Options' : 'nosniff'
 
               srcResp.on 'end', ->
-                resp.end()
+                finish resp
 
               srcResp.on 'error', ->
-                resp.end()
+                finish resp
 
               switch srcResp.statusCode
                 when 200
                   if newHeaders['content-type'] && newHeaders['content-type'].slice(0, 5) != 'image'
-                    four_oh_four("Non-Image content-type returned")
+                    four_oh_four(resp, "Non-Image content-type returned")
 
                   log newHeaders
 
@@ -112,19 +125,19 @@ server = Http.createServer (req, resp) ->
                   resp.writeHead srcResp.statusCode, newHeaders
 
                 else
-                  four_oh_four("Responded with #{srcResp.statusCode}:#{srcResp.headers}")
+                  four_oh_four(resp, "Responded with #{srcResp.statusCode}:#{srcResp.headers}")
 
           srcReq.on 'error', ->
-            resp.end()
+            finish resp
 
           srcReq.end()
 
         else
-          four_oh_four("No host found #{url.host}")
+          four_oh_four(resp, "No host found #{url.host}")
       else
-        four_oh_four("checksum mismatch #{hmac_digest}:#{query_digest}")
+        four_oh_four(resp, "checksum mismatch #{hmac_digest}:#{query_digest}")
     else
-      four_oh_four("No pathname provided on the server")
+      four_oh_four(resp, "No pathname provided on the server")
 
 console.log "SSL-Proxy running on #{port} with pid:#{process.pid}."
 console.log "Using the secret key #{shared_key}"
