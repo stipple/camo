@@ -139,6 +139,9 @@ server = Http.createServer (req, resp) ->
     else
       four_oh_four(resp, "No pathname provided on the server")
 
+process.on 'uncaughtException', (error) ->
+  log(error.stack)
+
 console.log "SSL-Proxy running on #{port} with pid:#{process.pid}."
 console.log "Using the secret key #{shared_key}"
 
