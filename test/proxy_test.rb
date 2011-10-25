@@ -7,24 +7,19 @@ require 'addressable/uri'
 
 require 'test/unit'
 
-class CamoProxyTest < Test::Unit::TestCase
+module CamoProxyTests
   def config
     { 'key'  => ENV['CAMO_KEY']  || "0x24FEEDFACEDEADBEEFCAFE",
       'host' => ENV['CAMO_HOST'] || "http://localhost:8081" }
   end
 
-  def request(image_url)
-    hexdigest = OpenSSL::HMAC.hexdigest(
-      OpenSSL::Digest::Digest.new('sha1'), config['key'], image_url)
-
-    uri = Addressable::URI.parse("#{config['host']}/#{hexdigest}")
-    uri.query_values = { 'url' => image_url, 'repo' => '', 'path' => '' }
-
-    RestClient.get(uri.to_s)
-  end
-
   def test_proxy_valid_image_url
     response = request('http://media.ebaumsworld.com/picture/Mincemeat/Pimp.jpg')
+    assert_equal(200, response.code)
+  end
+
+  def test_proxy_valid_image_url_with_crazy_subdomain
+    response = request('http://27.media.tumblr.com/tumblr_lkp6rdDfRi1qce6mto1_500.jpg')
     assert_equal(200, response.code)
   end
 
@@ -93,5 +88,42 @@ class CamoProxyTest < Test::Unit::TestCase
     assert_raise RestClient::ResourceNotFound do
       request('http://iphone.internal.example.org/foo.cgi')
     end
+  end
+end
+
+class CamoProxyQueryStringTest < Test::Unit::TestCase
+  include CamoProxyTests
+
+  def request_uri(image_url)
+    hexdigest = OpenSSL::HMAC.hexdigest(
+      OpenSSL::Digest::Digest.new('sha1'), config['key'], image_url)
+
+    uri = Addressable::URI.parse("#{config['host']}/#{hexdigest}")
+    uri.query_values = { 'url' => image_url, 'repo' => '', 'path' => '' }
+
+    uri.to_s
+  end
+
+  def request(image_url)
+    RestClient.get(request_uri(image_url))
+  end
+end
+
+class CamoProxyPathTest < Test::Unit::TestCase
+  include CamoProxyTests
+
+  def hexenc(image_url)
+    image_url.to_enum(:each_byte).map { |byte| "%02x" % byte }.join
+  end
+
+  def request_uri(image_url)
+    hexdigest = OpenSSL::HMAC.hexdigest(
+      OpenSSL::Digest::Digest.new('sha1'), config['key'], image_url)
+    encoded_image_url = hexenc(image_url)
+    "#{config['host']}/#{hexdigest}/#{encoded_image_url}"
+  end
+
+  def request(image_url)
+    RestClient.get(request_uri(image_url))
   end
 end

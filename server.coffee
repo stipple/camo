@@ -8,6 +8,7 @@ port            = process.env.PORT                 || 8081
 version         = "0.3.0"
 excluded        = process.env.CAMO_HOST_EXCLUSIONS || '*.example.org'
 shared_key      = process.env.CAMO_KEY             || '0x24FEEDFACEDEADBEEFCAFE'
+camo_hostname   = process.env.CAMO_HOSTNAME        || "unknown"
 logging_enabled = process.env.CAMO_LOGGING_ENABLED || "disabled"
 pidfile         = process.env.PIDFILE              || 'tmp/camo.pid'
 
@@ -18,7 +19,7 @@ log = (msg) ->
     console.log("--------------------------------------------")
 
 EXCLUDED_HOSTS = new RegExp(excluded.replace(".", "\\.").replace("*", "\\.*"))
-RESTRICTED_IPS = /^(10\.)|(127\.)|(169\.254)|(192\.168)|(172\.(1[6-9])|(2[0-9])|(3[0-1]))/
+RESTRICTED_IPS = /^((10\.)|(127\.)|(169\.254)|(192\.168)|(172\.((1[6-9])|(2[0-9])|(3[0-1]))))/
 
 total_connections   = 0
 current_connections = 0
@@ -32,7 +33,15 @@ four_oh_four = (resp, msg) ->
 finish = (resp, str) ->
   current_connections -= 1
   current_connections  = 0 if current_connections < 1
-  resp.end str
+  resp.connection && resp.end str
+
+# decode a string of two char hex digits
+hexdec = (str) ->
+  if str and str.length > 0 and str.length % 2 == 0 and not str.match(/[^0-9a-f]/)
+    buf = new Buffer(str.length / 2)
+    for i in [0...str.length] by 2
+      buf[i/2] = parseInt(str[i..i+1], 16)
+    buf.toString()
 
 server = Http.createServer (req, resp) ->
   if req.method != 'GET' || req.url == '/'
@@ -57,18 +66,31 @@ server = Http.createServer (req, resp) ->
       'x-content-type-options' : 'nosniff'
 
     delete(req.headers.cookie)
-    log(req.headers)
 
-    query_digest = url.pathname.replace(/^\//, '')
-    query_params = QueryString.parse(url.query)
+    [query_digest, encoded_url] = url.pathname.replace(/^\//, '').split("/", 2)
+    if encoded_url = hexdec(encoded_url)
+      url_type = 'path'
+      dest_url = encoded_url
+    else
+      url_type = 'query'
+      dest_url = QueryString.parse(url.query).url
 
-    if url.pathname?
+    log({
+      type:     url_type
+      url:      req.url
+      headers:  req.headers
+      dest:     dest_url
+      digest:   query_digest
+    })
+
+    if url.pathname? && dest_url
       hmac = Crypto.createHmac("sha1", shared_key)
-      hmac.update(query_params.url)
+      hmac.update(dest_url)
+
       hmac_digest = hmac.digest('hex')
 
       if hmac_digest == query_digest
-        url = Url.parse query_params.url
+        url = Url.parse dest_url
 
         if url.host? && !url.host.match(RESTRICTED_IPS)
           if url.host.match(EXCLUDED_HOSTS)
@@ -102,6 +124,7 @@ server = Http.createServer (req, resp) ->
                 'content-type'           : srcResp.headers['content-type']
                 'cache-control'          : srcResp.headers['cache-control']
                 'content-length'         : content_length
+                'Camo-Host'              : camo_hostname
                 'X-Content-Type-Options' : 'nosniff'
 
               srcResp.on 'end', ->

@@ -8,16 +8,32 @@ We want to allow people to keep embedding images in comments/issues/READMEs/goog
 
 Using a shared key, proxy URLs are encrypted with [hmac](http://en.wikipedia.org/wiki/HMAC) so we can bust caches/ban/rate limit if needed.
 
+Camo currently runs on node version 0.4.8 in production at GitHub.
+
 Features
 --------
 
-* Proxy remote images with a content-type of images/*
-* Proxy images < 5 MB
+* Proxy remote images with a content-type of `image/*`
+* Proxy images under 5 MB
 * Proxy google charts
 * 404s for anything other than a 200 or 304 HTTP response
 * Disallows proxying to private IP ranges
 
 At GitHub we render markdown and replace all of the `src` attributes on the `img` tags with the appropriate URL to hit the proxies.  There's example code for creating URLs in [the tests](https://github.com/atmos/camo/blob/master/test/proxy_test.rb).
+
+## URL Formats
+
+Camo supports two distinct URL formats:
+
+    http://example.org/<digest>?url=<image-url>
+    http://example.org/<digest>/<image-url>
+
+The `<digest>` is a 40 character hex encoded HMAC digest generated with a shared
+secret key and the unescaped `<image-url>` value. The `<image-url>` is the
+absolute URL locating an image. In the first format, the `<image-url>` should be
+URL escaped aggressively to ensure the original value isn't mangled in transit.
+In the second format, each byte of the `<image-url>` should be hex encoded such
+that the resulting value includes only characters `[0-9a-f]`.
 
 ## Testing Functionality
 
