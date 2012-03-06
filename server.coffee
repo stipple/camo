@@ -185,7 +185,7 @@ process.on 'uncaughtException', (error) ->
 console.log "SSL-Proxy running on #{port} with pid:#{process.pid}."
 console.log "Using the secret key #{shared_key}"
 
-Fs.open (pidfile), "w", 0600, (err, fd) ->
+Fs.open (pidfile), "w", 0o0600, (err, fd) ->
   Fs.writeSync fd, process.pid
 
 server.listen port
