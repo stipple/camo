@@ -4,8 +4,8 @@ Http        = require 'http'
 Crypto      = require 'crypto'
 QueryString = require 'querystring'
 
-port            = process.env.PORT        || 8081
-version         = "0.5.0"
+port            = parseInt process.env.PORT        || 8081
+version         = "1.1.3"
 excluded        = process.env.CAMO_HOST_EXCLUSIONS || '*.example.org'
 shared_key      = process.env.CAMO_KEY             || '0x24FEEDFACEDEADBEEFCAFE'
 max_redirects   = process.env.CAMO_MAX_REDIRECTS   || 4
@@ -67,13 +67,16 @@ process_url = (url, transferred_headers, resp, remaining_redirects) ->
         four_oh_four(resp, "Content-Length exceeded")
       else
         newHeaders =
-          'expires'                : srcResp.headers['expires']
           'content-type'           : srcResp.headers['content-type']
-          'cache-control'          : srcResp.headers['cache-control']
-          'content-length'         : content_length
+          'cache-control'          : srcResp.headers['cache-control'] || 'public, max-age=31536000'
           'Camo-Host'              : camo_hostname
           'X-Content-Type-Options' : 'nosniff'
 
+        # Handle chunked responses properly
+        if content_length?
+          newHeaders['content-length'] = content_length
+        if srcResp.headers['transfer-encoding']
+          newHeaders['transfer-encoding'] = srcResp.headers['transfer-encoding']
         if srcResp.headers['content-encoding']
           newHeaders['content-encoding'] = srcResp.headers['content-encoding']
 
@@ -83,6 +86,7 @@ process_url = (url, transferred_headers, resp, remaining_redirects) ->
         srcResp.on 'error', ->
           if is_finished
             finish resp
+
         switch srcResp.statusCode
           when 200
             if newHeaders['content-type'] && newHeaders['content-type'].slice(0, 5) != 'image'
@@ -91,11 +95,12 @@ process_url = (url, transferred_headers, resp, remaining_redirects) ->
             log newHeaders
 
             resp.writeHead srcResp.statusCode, newHeaders
-            srcResp.on 'data', (chunk) ->
-              resp.write chunk
-          when 301, 302
+            srcResp.pipe resp
+          when 301, 302, 303, 307
             if remaining_redirects <= 0
               four_oh_four(resp, "Exceeded max depth")
+            else if !srcResp.headers['location']
+              four_oh_four(resp, "Redirect with no location")
             else
               is_finished = false
               newUrl = Url.parse srcResp.headers['location']
@@ -138,10 +143,12 @@ server = Http.createServer (req, resp) ->
     total_connections   += 1
     current_connections += 1
     url = Url.parse req.url
+    user_agent = process.env.CAMO_HEADER_VIA or= "Camo Asset Proxy #{version}"
 
     transferred_headers =
-      'Via'                    : process.env.CAMO_HEADER_VIA or= "Camo Asset Proxy #{version}"
-      'Accept'                 : req.headers.accept
+      'Via'                    : user_agent
+      'User-Agent'             : user_agent
+      'Accept'                 : req.headers.accept ? 'image/*'
       'Accept-Encoding'        : req.headers['accept-encoding']
       'x-forwarded-for'        : req.headers['x-forwarded-for']
       'x-content-type-options' : 'nosniff'
@@ -164,9 +171,12 @@ server = Http.createServer (req, resp) ->
       digest:   query_digest
     })
 
+    if req.headers['via'] && req.headers['via'].indexOf(user_agent) != -1
+      return four_oh_four(resp, "Requesting from self")
+
     if url.pathname? && dest_url
       hmac = Crypto.createHmac("sha1", shared_key)
-      hmac.update(dest_url)
+      hmac.update(dest_url, 'utf8')
 
       hmac_digest = hmac.digest('hex')
 

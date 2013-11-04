@@ -4,7 +4,7 @@ require 'base64'
 require 'openssl'
 require 'rest_client'
 require 'addressable/uri'
-require 'ruby-debug'
+require 'thin'
 
 require 'test/unit'
 
@@ -12,6 +12,14 @@ module CamoProxyTests
   def config
     { 'key'  => ENV['CAMO_KEY']  || "0x24FEEDFACEDEADBEEFCAFE",
       'host' => ENV['CAMO_HOST'] || "http://localhost:8081" }
+  end
+
+  def test_proxy_survives_redirect_without_location
+    assert_raise RestClient::ResourceNotFound do
+      request('http://localhost:9292')
+    end
+    response = request('http://media.ebaumsworld.com/picture/Mincemeat/Pimp.jpg')
+    assert_equal(200, response.code)
   end
 
   def test_proxy_valid_image_url
@@ -27,6 +35,12 @@ module CamoProxyTests
   def test_proxy_valid_google_chart_url
     response = request('http://chart.apis.google.com/chart?chs=920x200&chxl=0:%7C2010-08-13%7C2010-09-12%7C2010-10-12%7C2010-11-11%7C1:%7C0%7C0%7C0%7C0%7C0%7C0&chm=B,EBF5FB,0,0,0&chco=008Cd6&chls=3,1,0&chg=8.3,20,1,4&chd=s:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&chxt=x,y&cht=lc')
     assert_equal(200, response.code)
+  end
+
+  def test_proxy_valid_chunked_image_file
+    response = request('http://www.igvita.com/posts/12/spdyproxy-diagram.png')
+    assert_equal(200, response.code)
+    assert_nil(response.headers[:content_length])
   end
 
   def test_follows_redirects
@@ -104,6 +118,18 @@ module CamoProxyTests
   def test_404s_on_environmental_excludes
     assert_raise RestClient::ResourceNotFound do
       request('http://iphone.internal.example.org/foo.cgi')
+    end
+  end
+
+  def test_follows_temporary_redirects
+    response = request('http://d.pr/i/rr7F+')
+    assert_equal(200, response.code)
+  end
+
+  def test_request_from_self
+    assert_raise RestClient::ResourceNotFound do
+      uri = request_uri("http://camo-localhost-test.herokuapp.com")
+      response = request( uri )
     end
   end
 end
