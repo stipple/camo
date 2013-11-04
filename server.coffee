@@ -4,7 +4,7 @@ Http        = require 'http'
 Crypto      = require 'crypto'
 QueryString = require 'querystring'
 
-port            = parseInt process.env.PORT        || 8081
+port            = process.env.PORT        || 8081
 version         = "1.1.3"
 excluded        = process.env.CAMO_HOST_EXCLUSIONS || '*.example.org'
 shared_key      = process.env.CAMO_KEY             || '0x24FEEDFACEDEADBEEFCAFE'
